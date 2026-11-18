@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Syntax check
+        run: python -m py_compile agent_tools.py
+
+      - name: CLI smoke test
+        run: python agent_tools.py --help || python agent_tools.py
+
+      - name: Confirm zero third-party dependencies
+        run: |
+          python - <<'PY'
+          import ast, pathlib, sys
+          stdlib = set(sys.stdlib_module_names)
+          found = set()
+          for path in pathlib.Path(".").rglob("*.py"):
+              tree = ast.parse(path.read_text(encoding="utf-8"))
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      for a in node.names:
+                          found.add(a.name.split(".")[0])
+                  elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                      found.add(node.module.split(".")[0])
+          external = sorted(m for m in found if m not in stdlib)
+          print("imports:", sorted(found))
+          print("third-party:", external or "none")
+          sys.exit(1 if external else 0)
+          PY
